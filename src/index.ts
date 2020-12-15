@@ -125,21 +125,26 @@ class DB {
 }
 
 interface InsertState {
-    nInserted: number;
-    linesCount: number
+    lInserted: number;
+    fInserted: number;
+    lFinalCount: number;
 }
 class Insert implements PromiseLike<InsertState> {
     protected executedPromise!: Promise<any>
 
-    protected async exec() {
+    protected async exec(): Promise<InsertState> {
         const db = this.db
         const fileCapacity = db.config.fileCapacity
 
         if (!this.items.length) {
-            return
+            return {
+                lInserted: 0,
+                fInserted: 0,
+                lFinalCount: db.linesCount,
+            }
         }
 
-        let newFilePath = `./${db.files.length}.${db.config.filesExtension}`
+        const updatedFiles = [...db.files]
         const remaininglines = db.linesCount % fileCapacity
 
         if (!remaininglines) {
@@ -147,13 +152,22 @@ class Insert implements PromiseLike<InsertState> {
             await Promise.all(delimited
                 .map((subItems, index) => {
                     const newFilePath = `./${db.files.length + index}.${db.config.filesExtension}`
+                    updatedFiles.push(newFilePath)
 
-                    return await appendFile(
+                    return appendFile(
                         path.join(db.dbPath, newFilePath),
-                        subItems.reduce(appendReducer, '')
+                        subItems.join(os.EOL),
                     )
                 })
             )
+
+            const insertedFiles = updatedFiles.length - db.files.length
+            db.files = updatedFiles
+            return {
+                lInserted: this.items.length,
+                fInserted: insertedFiles,
+                lFinalCount: db.linesCount + this.items.length
+            }
         } else {
             const existingLastFilePath = `./${db.files.length - 1}.${db.config.filesExtension}`
             const remainingItems: string[] = []
@@ -167,18 +181,39 @@ class Insert implements PromiseLike<InsertState> {
             }
             await appendFile(
                 path.join(db.dbPath, existingLastFilePath),
-                remainingItems.reduce(appendReducer, '')
+                remainingItems.join(os.EOL),
             )
-
             if (this.items.length <= remaininglines) {
-                return
+                const insertedFiles = updatedFiles.length - db.files.length
+                db.files = updatedFiles
+                return {
+                    lInserted: this.items.length,
+                    fInserted: insertedFiles,
+                    lFinalCount: db.linesCount + this.items.length
+                }
             }
 
-            for (let index = ; index <= this.items.length; index)
-        }
+            const lastItems = this.items.slice(i)
+            const delimited = delimitItems(lastItems, fileCapacity)
+            await Promise.all(delimited
+                .map((subItems, index) => {
+                    const newFilePath = `./${db.files.length + index}.${db.config.filesExtension}`
+                    updatedFiles.push(newFilePath)
 
-        function appendReducer(acc: string, str: string, index: number, items: string[]) {
-            return acc + (index !== items.length - 1 ? str + os.EOL : str), ''
+                    return appendFile(
+                        path.join(db.dbPath, newFilePath),
+                        subItems.join(os.EOL),
+                    )
+                })
+            )
+
+            const insertedFiles = updatedFiles.length - db.files.length
+            db.files = updatedFiles
+            return {
+                lInserted: this.items.length,
+                fInserted: insertedFiles,
+                lFinalCount: db.linesCount + this.items.length
+            }
         }
     }
 
@@ -213,11 +248,11 @@ class Insert implements PromiseLike<InsertState> {
         protected items: string[] = []
     ) { }
 
-    insert(item: string): Omit<Insert, 'insert' | 'insertMany'> {
+    one(item: string): Omit<Insert, 'one' | 'many'> {
         this.items = [item]
         return this
     }
-    insertMany(items: string[]): Omit<Insert, 'insert' | 'insertMany'> {
+    many(items: string[]): Omit<Insert, 'one' | 'many'> {
         this.items = [...items]
         return this
     }
@@ -228,7 +263,9 @@ interface QueryState {
         id: number;
         item: string
     }[]
-    linesCount: number
+
+    fCount: number
+    lFinalCount: number
 }
 class Query implements PromiseLike<QueryState> {
     protected executedPromise!: Promise<any>
@@ -265,9 +302,10 @@ class Query implements PromiseLike<QueryState> {
         protected db: DB,
         protected dbOpsQueue: any[],
 
-        public segmentName?: string,
-        public skipCount: number = 0,
-        public limitCount: number = 0,
+        protected segmentName?: string,
+        protected skipCount: number = 0,
+        protected limitCount: number = 0,
+        // protected segment
     ) { }
 
     segment(segmentName: string) {
@@ -301,8 +339,10 @@ class Query implements PromiseLike<QueryState> {
 
 
 async function run() {
-    // const db = await JsonBl.connect('asd')
-    // await db.query().segment('3').skip(10).limit(20)
+    const db = await JsonBl.connect('asd')
+    await db.query().segment('3').skip(10).limit(20)
+    await db.insert().many().
+
 
 
 

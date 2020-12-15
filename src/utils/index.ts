@@ -15,7 +15,6 @@ async function sleep(time = 1000): Promise<void> {
     });
 }
 
-
 async function linesCount(filePath: string): Promise<number> {
     return new Promise(async res => {
         let linesCount = 0
@@ -66,9 +65,48 @@ async function chronologicalSort(filePaths: string[], order: number) {
     ).map(stat => stat.filePath)
 }
 
+function delimitItems<T>(items: T[], size: number) {
+    size = size <= 0 ? 1 : size
+    if(items.length === 0) {
+        return []
+    }
+    
+    return items.reduce((delimited: T[][], item) => {
+        let subItems = delimited[delimited.length - 1]
+
+        if (subItems.length === size) {
+            delimited.push([])
+            subItems = delimited[delimited.length - 1]
+        }
+        subItems.push(item)
+        return delimited
+    }, [[]])
+}
+
+
 export {
     sleep,
     linesCount,
     matchGlob,
     chronologicalSort,
+    delimitItems
 }
+
+// const appendFile = promisify(fs.appendFile)
+// const mkdir = promisify(fs.mkdir)
+// const writeFile = promisify(fs.writeFile)
+// const readdir = promisify(fs.readdir)
+
+// async function run() {
+
+//     console.log(
+//         'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+//         await readdir('./dist')
+//     )
+//     Promise.reject(111)
+//         .then(v => console.log('v'))
+//         .catch(c => console.log(c))
+//         .then(l => console.log('aaaaaa'))
+// }
+
+// run()

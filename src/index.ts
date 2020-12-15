@@ -1,4 +1,5 @@
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { promisify } from 'util'
 
@@ -8,12 +9,13 @@ import jsonfile from 'jsonfile'
 
 import {
     chronologicalSort,
+    delimitItems,
     linesCount,
     matchGlob,
 } from './utils'
 
 
-const access = promisify(fs.access)
+const appendFile = promisify(fs.appendFile)
 const mkdir = promisify(fs.mkdir)
 const writeFile = promisify(fs.writeFile)
 const readdir = promisify(fs.readdir)
@@ -41,7 +43,8 @@ class JsonBl {
                     let files: string[] = []
                     let filesCount = 0
                     try {
-                        files = await chronologicalSort(await readdir(dbStoragePath), 1)
+                        const fileNames = await readdir(dbStoragePath)
+                        files = await chronologicalSort(fileNames.map(fileName => path.join(dbStoragePath, `./${fileName}`)), 1)
                         filesCount = files.length
                     } catch { await mkdir(dbStoragePath) }
 
@@ -129,8 +132,53 @@ class Insert implements PromiseLike<InsertState> {
     protected executedPromise!: Promise<any>
 
     protected async exec() {
-        if(this.db.linesCount % this.db.config.fileCapacity === 0) {
-            
+        const db = this.db
+        const fileCapacity = db.config.fileCapacity
+
+        if (!this.items.length) {
+            return
+        }
+
+        let newFilePath = `./${db.files.length}.${db.config.filesExtension}`
+        const remaininglines = db.linesCount % fileCapacity
+
+        if (!remaininglines) {
+            const delimited = delimitItems(this.items, fileCapacity)
+            await Promise.all(delimited
+                .map((subItems, index) => {
+                    const newFilePath = `./${db.files.length + index}.${db.config.filesExtension}`
+
+                    return await appendFile(
+                        path.join(db.dbPath, newFilePath),
+                        subItems.reduce(appendReducer, '')
+                    )
+                })
+            )
+        } else {
+            const existingLastFilePath = `./${db.files.length - 1}.${db.config.filesExtension}`
+            const remainingItems: string[] = []
+
+            let i!: number
+            for (const item of this.items) {
+                i = remainingItems.push(item)
+                if (i === remaininglines) {
+                    break
+                }
+            }
+            await appendFile(
+                path.join(db.dbPath, existingLastFilePath),
+                remainingItems.reduce(appendReducer, '')
+            )
+
+            if (this.items.length <= remaininglines) {
+                return
+            }
+
+            for (let index = ; index <= this.items.length; index)
+        }
+
+        function appendReducer(acc: string, str: string, index: number, items: string[]) {
+            return acc + (index !== items.length - 1 ? str + os.EOL : str), ''
         }
     }
 
@@ -186,7 +234,7 @@ class Query implements PromiseLike<QueryState> {
     protected executedPromise!: Promise<any>
 
     protected async exec() {
-
+        // await appendFile()
     }
 
     then<TResult1 = QueryState, TResult2 = never>(onfulfilled?: ((value: QueryState) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): PromiseLike<TResult1 | TResult2> {
@@ -244,7 +292,22 @@ class Query implements PromiseLike<QueryState> {
     }
 }
 
+
+
+
+
+
+
+
+
 async function run() {
+    // const db = await JsonBl.connect('asd')
+    // await db.query().segment('3').skip(10).limit(20)
+
+
+
+
+
     // const count = (await matchGlob(`/aaaaaa/asssssssaaa`, { strict: true }))
     // console.log(count)
     // i
@@ -257,13 +320,24 @@ async function run() {
     // }
     // new Promise().then
     // await o
-    console.log(
-        await readdir('./dist')
-    )
-    Promise.reject(111)
-        .then(v => console.log('v'))
-        .catch(c => console.log(c))
-        .then(l => console.log('aaaaaa'))
+    // console.log(
+    //     await readdir('./dist')
+    // )
+    // Promise.reject(111)
+    //     .then(v => console.log('v'))
+    //     .catch(c => console.log(c))
+    //     .then(l => console.log('aaaaaa'))
+
+    async function f() {
+        // await Promise.resolve()
+        console.log('f')
+    }
+    async function g() {
+        await f()
+        console.log('g')
+    }
+    g()
+    console.log('b')
 }
 
 run()

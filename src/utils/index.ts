@@ -116,7 +116,6 @@ function delimitItems<T>(items: T[], size: number) {
 export {
     sleep,
     linesCount,
-    matchGlob,
     chronologicalSort,
     delimitItems,
     readLinesUp,

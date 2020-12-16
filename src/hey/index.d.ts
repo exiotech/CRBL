@@ -1,1 +1,0 @@
-export declare function hey(n: string): Promise<void>

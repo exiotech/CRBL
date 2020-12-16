@@ -3,9 +3,6 @@ import readline from 'readline'
 import { Writable } from 'stream'
 import { promisify } from 'util'
 
-import glob from 'glob'
-
-
 const statAsync = promisify(fs.stat)
 
 
@@ -34,20 +31,6 @@ async function linesCount(filePath: string): Promise<number> {
             }
         } catch { }
         res(linesCount)
-    })
-}
-
-async function matchGlob(pattern: Parameters<typeof glob>['0'], options?: Parameters<typeof glob>['1']): Promise<string[]> {
-    return new Promise((res, rej) => {
-        const handler = (err: any, matches: any) => {
-            if (err) return rej(err)
-            res(matches)
-        }
-        if (options) {
-            glob(pattern, options, handler)
-        } else {
-            glob(pattern, handler)
-        }
     })
 }
 

@@ -1,4 +1,4 @@
 {
-    "filesCapacity": 100,
-    "filesExtension": "something"
+    "fileCapacity": 100,
+    "fileExtension": "something"
 }

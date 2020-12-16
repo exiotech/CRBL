@@ -90,7 +90,7 @@ async function chronologicalSort(filePaths: string[], order: number) {
         )
     )
     return stats.sort((a, b) =>
-        order * (b.stat.mtime.getTime() - a.stat.mtime.getTime())
+        order * (a.stat.birthtime.getTime() - b.stat.birthtime.getTime())
     ).map(stat => stat.filePath)
 }
 

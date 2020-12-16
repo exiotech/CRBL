@@ -22,13 +22,15 @@ const writeFile = promisify(fs.writeFile)
 const readdir = promisify(fs.readdir)
 
 class CRBL {
-    static dbMap: {
+    static connections: {
         [uri: string]: Promise<DB>
     } = {}
 
     static async connect(dbPath: string) {
-        if (!this.dbMap[dbPath]) {
+        if (!this.connections[dbPath]) {
             const DBPromise: Promise<DB> = (async () => {
+                await Promise.resolve()
+
                 try {
                     const dbConfigPath = path.join(dbPath, './config.json')
                     const dbStoragePath = path.join(dbPath, './store')
@@ -38,7 +40,6 @@ class CRBL {
                         fileExtension: string,
                     } = await jsonfile.readFile(dbConfigPath)
                     if (typeof config.fileCapacity !== 'number' || (config.fileExtension + '').trim().length === 0) {
-                        console.log(config)
                         throw new Error
                     }
 
@@ -53,33 +54,34 @@ class CRBL {
                         filesCount = files.length
                     } catch { await mkdir(dbStoragePath) }
 
-                    const dbLinesCount = filesCount ? (filesCount - 1) * config.fileCapacity + await linesCount(files[filesCount - 1]) : 0
+                    const dbLinesCount = filesCount ? ((filesCount - 1) * config.fileCapacity + await linesCount(files[filesCount - 1])) : 0
                     return new DB(path.basename(dbPath), dbPath, files, dbLinesCount, config)
                 } catch (err) {
-                    delete this.dbMap[dbPath]
+                    delete this.connections[dbPath]
                     throw new Error(`Unable to connect to db at path: ${dbPath}`)
                 }
             })() as any
-            this.dbMap[dbPath] = DBPromise
+            this.connections[dbPath] = DBPromise
         }
-        return this.dbMap[dbPath]
+        return this.connections[dbPath]
     }
 
     static async createAndConnect(dbPath: string, dbOptions: {
         fileCapacity: number,
         fileExtension?: string
     }) {
-        if (!this.dbMap[dbPath]) {
-            const config: {
-                fileCapacity: number,
-                fileExtension: string,
-            } = {
-                ...dbOptions,
-                fileExtension: dbOptions.fileExtension ?? 'txt'
-            }
-
+        if (!this.connections[dbPath]) {
             const DBPromise: Promise<DB> = (async () => {
+                await Promise.resolve()
+
                 try {
+                    const config: {
+                        fileCapacity: number,
+                        fileExtension: string,
+                    } = {
+                        ...dbOptions,
+                        fileExtension: dbOptions.fileExtension ?? 'txt'
+                    }
 
                     const configJson = JSON.stringify(config)
 
@@ -95,9 +97,9 @@ class CRBL {
                     throw new Error(`Unable to create db at path: ${dbPath}`)
                 }
             })() as any
-            this.dbMap[dbPath] = DBPromise
+            this.connections[dbPath] = DBPromise
 
-            return this.dbMap[dbPath]
+            return this.connections[dbPath]
         }
         throw new Error(`Unable to create db at path: ${dbPath}`)
     }
@@ -124,16 +126,26 @@ class DB {
     }
 
     insert(items: string[]): Omit<Insert, 'one' | 'many'>
+    insert(item: string): Omit<Insert, 'one' | 'many'>
     insert(): Insert
-    insert(items?: string[]) {
-        return new Insert(this, this.insertOpsQueue, items)
+    insert(items?: string | string[]) {
+        return items instanceof Array
+            ? new Insert(this, this.insertOpsQueue).many(items)
+            : typeof items === 'string'
+                ? new Insert(this, this.insertOpsQueue).one(items)
+                : new Insert(this, this.insertOpsQueue)
 
     }
     // Change this
-    query(segments?: number[]): Omit<Query, 'segment' | 'segments'>
+    query(segmentRange: [number, number]): Omit<Query, 'segment' | 'segmentRange'>
+    query(segment: number): Omit<Query, 'segment' | 'segmentRange'>
     query(): Query
-    query(segments?: number[]) {
-        return new Query(this, segments)
+    query(segment?: number | [number, number]) {
+        return segment instanceof Array
+            ? new Query(this).segmentRange(segment)
+            : typeof segment === 'number'
+                ? new Query(this).segment(segment)
+                : new Query(this)
     }
 }
 
@@ -148,7 +160,7 @@ class Insert implements PromiseLike<InsertState> {
     protected async exec(): Promise<InsertState> {
         const db = this.db
         const fileCapacity = db.config.fileCapacity
-        const storePath = db['storagPath']
+        const storagePath = db['storagPath']
 
         if (!this.items.length) {
             return {
@@ -162,11 +174,10 @@ class Insert implements PromiseLike<InsertState> {
         const remaininglines = fileCapacity - db.linesCount % fileCapacity
 
         if (remaininglines === fileCapacity) {
-            console.log('as')
             const delimited = delimitItems(this.items, fileCapacity)
             await Promise.all(delimited
                 .map((items, index) => {
-                    const newFilePath = path.join(storePath, `./${db.files.length + index}.${db.config.fileExtension}`)
+                    const newFilePath = path.join(storagePath, `./${db.files.length + index}.${db.config.fileExtension}`)
                     updatedFiles.push(newFilePath)
 
                     return appendFile(
@@ -177,14 +188,16 @@ class Insert implements PromiseLike<InsertState> {
             )
 
             const insertedFiles = updatedFiles.length - db.files.length
+            const insertedLinesCount = this.items.length
+
             db.files = updatedFiles
+            db.linesCount = db.linesCount + insertedLinesCount
             return {
-                lInserted: this.items.length,
+                lInserted: insertedLinesCount,
                 fInserted: insertedFiles,
-                lCount: db.linesCount + this.items.length
+                lCount: db.linesCount
             }
         } else {
-            console.log('a')
             const existingLastFilePath = db.files[db.files.length - 1] // `./${db.files.length - 1}.${db.config.fileExtension}`
             const remainingItems: string[] = []
 
@@ -197,15 +210,18 @@ class Insert implements PromiseLike<InsertState> {
             }
             await appendFile(
                 existingLastFilePath,
-                remainingItems.join(os.EOL),
+                os.EOL + remainingItems.join(os.EOL),
             )
             if (this.items.length <= remaininglines) {
                 const insertedFiles = updatedFiles.length - db.files.length
+                const insertedLinesCount = this.items.length
+
                 db.files = updatedFiles
+                db.linesCount = db.linesCount + insertedLinesCount
                 return {
-                    lInserted: this.items.length,
+                    lInserted: insertedLinesCount,
                     fInserted: insertedFiles,
-                    lCount: db.linesCount + this.items.length
+                    lCount: db.linesCount
                 }
             }
 
@@ -213,7 +229,7 @@ class Insert implements PromiseLike<InsertState> {
             const delimited = delimitItems(lastItems, fileCapacity)
             await Promise.all(delimited
                 .map((subItems, index) => {
-                    const newFilePath = path.join(storePath, `./${db.files.length + index}.${db.config.fileExtension}`)
+                    const newFilePath = path.join(storagePath, `./${db.files.length + index}.${db.config.fileExtension}`)
                     updatedFiles.push(newFilePath)
 
                     return appendFile(
@@ -224,11 +240,14 @@ class Insert implements PromiseLike<InsertState> {
             )
 
             const insertedFiles = updatedFiles.length - db.files.length
+            const insertedLinesCount = this.items.length
+
             db.files = updatedFiles
+            db.linesCount = db.linesCount + insertedLinesCount
             return {
-                lInserted: this.items.length,
+                lInserted: insertedLinesCount,
                 fInserted: insertedFiles,
-                lCount: db.linesCount + this.items.length
+                lCount: db.linesCount
             }
         }
     }
@@ -321,7 +340,7 @@ class Query implements PromiseLike<QueryState> {
 
         let rangeStart = range.index(0)
         if (this.skipCount) {
-            range.subtract(rangeStart, rangeStart + this.skipCount)
+            range.subtract(rangeStart, rangeStart + this.skipCount - 1)
             if (!range.length) {
                 return result
             }
@@ -334,14 +353,13 @@ class Query implements PromiseLike<QueryState> {
                 return result
             }
         }
-
         const queries: Promise<string[]>[] = []
 
         const start = range.index(0)
         const end = range.index(range.length - 1)
 
-        const startFileIndex = start / rangeCapacity
-        const endFileIndex = end / rangeCapacity
+        const startFileIndex = Math.floor(start / rangeCapacity)
+        const endFileIndex = Math.floor(end / rangeCapacity)
 
         let currFileIndex = startFileIndex
         let currLineIndex = start
@@ -352,7 +370,7 @@ class Query implements PromiseLike<QueryState> {
             currFileIndex++
         }
 
-        const query = readLinesUp(files[currFileIndex], 0, end % rangeCapacity)
+        const query = readLinesUp(files[currFileIndex], currLineIndex % rangeCapacity, end % rangeCapacity)
         queries.push(query)
 
         const linesRanges = await Promise.all(queries)
@@ -401,11 +419,11 @@ class Query implements PromiseLike<QueryState> {
         this.segments = [...this.segments]
     }
 
-    segment(segment: number): Omit<Query, 'segment' | 'segments'> {
+    segment(segment: number): Omit<Query, 'segment' | 'segmentRange'> {
         this.segments = [segment]
         return this
     }
-    segmentRange(segmentRange: [number, number]): Omit<Query, 'segment' | 'segments'> {
+    segmentRange(segmentRange: [number, number]): Omit<Query, 'segment' | 'segmentRange'> {
         let start = segmentRange[0] < 0 ? 0 : segmentRange[0]
         let end = segmentRange[1] < 0 ? 0 : segmentRange[1]
         if (start > end) {
@@ -418,7 +436,7 @@ class Query implements PromiseLike<QueryState> {
         }
         return this
     }
-    skip(count: number): Omit<Query, 'segment' | 'segments'> {
+    skip(count: number): Omit<Query, 'segment' | 'segmentRange'> {
         if (count < 0) {
             this.skipCount = 0
             return this
@@ -426,7 +444,7 @@ class Query implements PromiseLike<QueryState> {
         this.skipCount = count
         return this
     }
-    limit(count: number): Omit<Query, 'segment' | 'segments'> {
+    limit(count: number): Omit<Query, 'segment' | 'segmentRange'> {
         if (count < 0) {
             this.limitCount = 0
             return this
@@ -448,4 +466,4 @@ export {
     Query,
 }
 
-import './example'
+// import './example'

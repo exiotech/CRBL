@@ -33,7 +33,6 @@ async function linesCount(filePath: string): Promise<number> {
                 linesCount++
             }
         } catch { }
-        console.log('hey')
         res(linesCount)
     })
 }
@@ -48,6 +47,53 @@ async function matchGlob(pattern: Parameters<typeof glob>['0'], options?: Parame
             glob(pattern, options, handler)
         } else {
             glob(pattern, handler)
+        }
+    })
+}
+
+/**
+ * If End is less than start it will be set to start.
+ * step **MUST** be positive.
+ */
+async function readLinesUp(path: string, start?: number, end?: number, step?: number): Promise<string[]> {
+    return new Promise(async (res, rej) => {
+        try {
+            start = start ?? 0
+            start = start < 0 ? 0 : start
+            
+            end = end ?? Infinity
+            end = end < start ? start : end
+
+            step = step ?? 1
+            step = step < 1 ? 1 : step
+
+            const lines = []
+
+            const readStream = fs.createReadStream(path)
+            readStream.on('error', (err) => rej(err))
+            const rl = readline.createInterface({
+                input: readStream,
+                output: new Writable(),
+                crlfDelay: Infinity
+            })
+
+            let lineIndex = 0
+            for await (const line of rl) {
+                if (start > end) break
+
+                if (lineIndex < start) {
+                    lineIndex++
+                    continue
+                }
+                lines.push(line)
+
+                lineIndex++
+                start += step
+            }
+
+            return res(lines)
+        } catch (err) {
+            return rej(err)
         }
     })
 }
@@ -67,10 +113,10 @@ async function chronologicalSort(filePaths: string[], order: number) {
 
 function delimitItems<T>(items: T[], size: number) {
     size = size <= 0 ? 1 : size
-    if(items.length === 0) {
+    if (items.length === 0) {
         return []
     }
-    
+
     return items.reduce((delimited: T[][], item) => {
         let subItems = delimited[delimited.length - 1]
 
@@ -89,7 +135,8 @@ export {
     linesCount,
     matchGlob,
     chronologicalSort,
-    delimitItems
+    delimitItems,
+    readLinesUp,
 }
 
 // const appendFile = promisify(fs.appendFile)

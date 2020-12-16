@@ -5,6 +5,7 @@ import { promisify } from 'util'
 
 
 import jsonfile from 'jsonfile'
+import DRange from "drange";
 
 
 import {
@@ -12,6 +13,7 @@ import {
     delimitItems,
     linesCount,
     matchGlob,
+    readLinesUp,
 } from './utils'
 
 
@@ -44,7 +46,10 @@ class JsonBl {
                     let filesCount = 0
                     try {
                         const fileNames = await readdir(dbStoragePath)
-                        files = await chronologicalSort(fileNames.map(fileName => path.join(dbStoragePath, `./${fileName}`)), 1)
+                        files = await chronologicalSort(fileNames
+                            .map(fileName =>
+                                path.join(dbStoragePath, `./${fileName}`)
+                            ), 1)
                         filesCount = files.length
                     } catch { await mkdir(dbStoragePath) }
 
@@ -100,7 +105,7 @@ class JsonBl {
 
 
 class DB {
-    protected opsQueue: (Query | Insert)[] = []
+    protected insertOpsQueue: (Query | Insert)[] = []
 
     constructor(
         public dbName: string,
@@ -115,12 +120,17 @@ class DB {
 
     }
 
+    insert(items: string[]): Omit<Insert, 'one' | 'many'>
+    insert(): Insert
     insert(items?: string[]) {
-        return new Insert(this, this.opsQueue, items)
+        return new Insert(this, this.insertOpsQueue, items)
 
     }
-    query(segment?: string) {
-        return new Query(this, this.opsQueue, segment)
+    // Change this
+    query(segments?: number[]): Omit<Query, 'segment' | 'segments'>
+    query(): Query
+    query(segments?: number[]) {
+        return new Query(this, segments)
     }
 }
 
@@ -222,8 +232,8 @@ class Insert implements PromiseLike<InsertState> {
             const InsertPromise = new Promise(async (res, rej) => {
                 await Promise.resolve()
 
-                const lastOps = this.dbOpsQueue[this.dbOpsQueue.length - 1]
-                this.dbOpsQueue.push(this)
+                const lastOps = this.insertOpsQueue[this.insertOpsQueue.length - 1]
+                this.insertOpsQueue.push(this)
                 if (lastOps instanceof Query) {
                     try {
                         await lastOps['executedPromise']
@@ -233,8 +243,9 @@ class Insert implements PromiseLike<InsertState> {
                         await lastOps['executedPromise']
                     } catch { }
                 }
-                await this.exec()
-                this.dbOpsQueue.shift()
+                const result = await this.exec()
+                this.insertOpsQueue.shift()
+                res(result)
             }).then(onfulfilled as any, onrejected)
             this.executedPromise = InsertPromise
         }
@@ -243,10 +254,12 @@ class Insert implements PromiseLike<InsertState> {
 
     constructor(
         protected db: DB,
-        protected dbOpsQueue: any[],
+        protected insertOpsQueue: any[],
 
         protected items: string[] = []
-    ) { }
+    ) {
+        this.items = [...this.items]
+    }
 
     one(item: string): Omit<Insert, 'one' | 'many'> {
         this.items = [item]
@@ -277,21 +290,79 @@ class Query implements PromiseLike<QueryState> {
     then<TResult1 = QueryState, TResult2 = never>(onfulfilled?: ((value: QueryState) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): PromiseLike<TResult1 | TResult2> {
         if (!this.executedPromise) {
             const QueryPromise = new Promise(async (res, rej) => {
-                await Promise.resolve()
+                const db = this.db
+                const files = db.files
+                const linesCount = db.linesCount
+                const rangeCapacity = db.config.fileCapacity
 
-                const lastOps = this.dbOpsQueue[this.dbOpsQueue.length - 1]
-                this.dbOpsQueue.push(this)
-                if (lastOps instanceof Query) {
-                    try {
-                        await lastOps['executedPromise']
-                    } catch { }
-                } else if (lastOps instanceof Insert) {
-                    try {
-                        await lastOps['executedPromise']
-                    } catch { }
+                let range = new DRange(0, linesCount)
+                if (this.segmentsArr.length) {
+                    range = new DRange()
+                    for (const segment of this.segmentsArr) {
+                        if (segment < 0 || segment > files.length - 1) {
+                            continue
+                        }
+                        range.add(segment * rangeCapacity, segment * rangeCapacity + (rangeCapacity - 1))
+                    }
                 }
-                await this.exec()
-                this.dbOpsQueue.shift()
+                range.subtract(linesCount, Infinity)
+
+                const result: QueryState = {
+                    queryItems: [],
+                    fCount: files.length,
+                    lFinalCount: linesCount,
+                }
+                if (!range.length) {
+                    return res(result)
+                }
+
+                let rangeStart = range.index(0)
+                if (this.skipCount) {
+                    range.subtract(rangeStart, rangeStart + this.skipCount)
+                    if (!range.length) {
+                        return res(result)
+                    }
+                }
+
+                rangeStart = range.index(0)
+                if (this.limitCount) {
+                    range.subtract(rangeStart + this.limitCount, Infinity)
+                    if (!range.length) {
+                        return res(result)
+                    }
+                }
+
+                const queries: Promise<string[]>[] = []
+
+                const start = range.index(0)
+                const end = range.index(range.length - 1)
+
+                const startFileIndex = start / rangeCapacity
+                const endFileIndex = end / rangeCapacity
+
+                let currFileIndex = startFileIndex
+                let currLineIndex = start
+                while (currFileIndex !== endFileIndex) {
+                    const query = readLinesUp(db.files[currFileIndex], currLineIndex % rangeCapacity)
+                    queries.push(query)
+                    currLineIndex += currLineIndex - currLineIndex % rangeCapacity
+                    currFileIndex++
+                }
+
+                const query = readLinesUp(db.files[startFileIndex], 0, end % rangeCapacity)
+                queries.push(query)
+
+                const linesRanges = await Promise.all(queries)
+                let id = start
+
+                linesRanges.forEach(lines => {
+                    lines.forEach(line => result.queryItems.push({
+                        id: id++,
+                        item: line
+                    }))
+                })
+                
+                return result
             }).then(onfulfilled as any, onrejected)
             this.executedPromise = QueryPromise
         }
@@ -300,19 +371,32 @@ class Query implements PromiseLike<QueryState> {
 
     constructor(
         protected db: DB,
-        protected dbOpsQueue: any[],
 
-        protected segmentName?: string,
+        protected segmentsArr: number[] = [],
         protected skipCount: number = 0,
         protected limitCount: number = 0,
         // protected segment
-    ) { }
+    ) {
+        this.segmentsArr = [...this.segmentsArr]
+    }
 
-    segment(segmentName: string) {
-        this.segmentName = segmentName
+    segment(segment: number): Omit<Query, 'segment' | 'segments'> {
+        this.segmentsArr = [segment]
         return this
     }
-    skip(count: number) {
+    segmentRange(segmentsRange: [number, number]): Omit<Query, 'segment' | 'segments'> {
+        let start = segmentsRange[0] < 0 ? 0 : segmentsRange[0]
+        let end = segmentsRange[1] < 0 ? 0 : segmentsRange[1]
+        if (start > end) {
+            ({ start, end } = { start: end, end: start })
+        }
+        this.segmentsArr = []
+        for (let i = 0; start + i <= end; i++) {
+            this.segmentsArr.push(start + i)
+        }
+        return this
+    }
+    skip(count: number): Omit<Query, 'segment' | 'segments'> {
         if (count < 0) {
             this.skipCount = 0
             return this
@@ -320,7 +404,7 @@ class Query implements PromiseLike<QueryState> {
         this.skipCount = count
         return this
     }
-    limit(count: number) {
+    limit(count: number): Omit<Query, 'segment' | 'segments'> {
         if (count < 0) {
             this.limitCount = 0
             return this
@@ -339,11 +423,26 @@ class Query implements PromiseLike<QueryState> {
 
 
 async function run() {
-    const db = await JsonBl.connect('asd')
-    await db.query().segment('3').skip(10).limit(20)
-    await db.insert().many().
+    // range.add(2, 3)
+    // range.add(10, 11)
+    // range.add(7)
+    // range.add(9)
+    // const range = new DRange(10, 100)
+    // // console.log(range.numbers().toString());
+    // console.log(range.length);
+    // range.subtract(100, Infinity)
+    // console.log(range.numbers())
+    // console.log(range.index(0))
+    // range.subtract(2,5)
+    // range.subtract( 47, Infinity)
+    // console.log(range.toString())
+    // console.log(range.index(6))
+    // const db = await JsonBl.connect('asd')
+    // await db.query().segment('3').skip(10).limit(20)
+    // await db.insert(['asd'])
 
-
+    // const lines = await readLinesUp('/home/redsky/Documents/exio.tech/projects/jsbl/src/jsonl/db/store/1.txt', 1, 3, -1)
+    // console.log(lines)
 
 
 
@@ -368,16 +467,24 @@ async function run() {
     //     .catch(c => console.log(c))
     //     .then(l => console.log('aaaaaa'))
 
-    async function f() {
-        // await Promise.resolve()
-        console.log('f')
-    }
-    async function g() {
-        await f()
-        console.log('g')
-    }
-    g()
-    console.log('b')
+    // async function f() {
+    //     // await Promise.resolve()
+    //     console.log('f')
+    // }
+    // async function g() {
+    //     await f()
+    //     console.log('g')
+    // }
+    // g()
+    // console.log('b')
+    // const test = '[ 13-80, 1-2, 1, 3-, 9, ]'.match(/((\d+)-(\d+))|(\d+)/)
+    // console.log(test)
+
+
+    // var str = 'asd-0.testing';
+    // var regex = /(asd-)\d(\.\w+)/;
+    // str = str.replaceAll(regex, "$11$2");
+    // console.log(str);
 }
 
 run()

@@ -15,12 +15,15 @@
   "author": "Ando",
   "license": "ISC",
   "devDependencies": {
+    "@types/discontinuous-range": "^1.0.2",
     "@types/glob": "^7.1.3",
     "@types/jsonfile": "^6.0.0",
     "@types/node": "^14.11.2",
     "nodemon": "^2.0.4"
   },
   "dependencies": {
+    "discontinuous-range": "^1.0.0",
+    "drange": "^2.0.1",
     "glob": "^7.1.6",
     "jsonfile": "^6.1.0"
   }

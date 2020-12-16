@@ -12,7 +12,6 @@ import {
     chronologicalSort,
     delimitItems,
     linesCount,
-    matchGlob,
     readLinesUp,
 } from './utils'
 
@@ -22,7 +21,7 @@ const mkdir = promisify(fs.mkdir)
 const writeFile = promisify(fs.writeFile)
 const readdir = promisify(fs.readdir)
 
-class JsonBl {
+class CRBL {
     static dbMap: {
         [uri: string]: Promise<DB>
     } = {}
@@ -31,15 +30,16 @@ class JsonBl {
         if (!this.dbMap[dbPath]) {
             const DBPromise: Promise<DB> = (async () => {
                 try {
-                    const dbConfigPath = path.join(dbPath, './config')
+                    const dbConfigPath = path.join(dbPath, './config.json')
                     const dbStoragePath = path.join(dbPath, './store')
 
                     const config: {
                         fileCapacity: number,
-                        filesExtension: string,
+                        fileExtension: string,
                     } = await jsonfile.readFile(dbConfigPath)
-                    if (typeof config!.fileCapacity !== 'number' || (config + '').trim().length === 0) {
-                        throw Error
+                    if (typeof config.fileCapacity !== 'number' || (config.fileExtension + '').trim().length === 0) {
+                        console.log(config)
+                        throw new Error
                     }
 
                     let files: string[] = []
@@ -55,7 +55,7 @@ class JsonBl {
 
                     const dbLinesCount = filesCount ? (filesCount - 1) * config.fileCapacity + await linesCount(files[filesCount - 1]) : 0
                     return new DB(path.basename(dbPath), dbPath, files, dbLinesCount, config)
-                } catch {
+                } catch (err) {
                     delete this.dbMap[dbPath]
                     throw new Error(`Unable to connect to db at path: ${dbPath}`)
                 }
@@ -72,10 +72,10 @@ class JsonBl {
         if (!this.dbMap[dbPath]) {
             const config: {
                 fileCapacity: number,
-                filesExtension: string,
+                fileExtension: string,
             } = {
                 ...dbOptions,
-                filesExtension: dbOptions.fileExtension === undefined ? 'txt' : dbOptions.fileExtension
+                fileExtension: dbOptions.fileExtension ?? 'txt'
             }
 
             const DBPromise: Promise<DB> = (async () => {
@@ -83,7 +83,7 @@ class JsonBl {
 
                     const configJson = JSON.stringify(config)
 
-                    const dbConfigPath = path.join(dbPath, './config')
+                    const dbConfigPath = path.join(dbPath, './config.json')
                     const dbStoragePath = path.join(dbPath, './store')
 
                     await mkdir(dbPath)
@@ -106,6 +106,8 @@ class JsonBl {
 
 class DB {
     protected insertOpsQueue: (Query | Insert)[] = []
+    protected storagPath: string
+    protected configPath: string
 
     constructor(
         public dbName: string,
@@ -114,10 +116,11 @@ class DB {
         public linesCount: number,
         public config: {
             fileCapacity: number,
-            filesExtension: string,
+            fileExtension: string,
         }
     ) {
-
+        this.storagPath = path.join(dbPath, './store')
+        this.configPath = path.join(dbPath, './config.json')
     }
 
     insert(items: string[]): Omit<Insert, 'one' | 'many'>
@@ -137,7 +140,7 @@ class DB {
 interface InsertState {
     lInserted: number;
     fInserted: number;
-    lFinalCount: number;
+    lCount: number;
 }
 class Insert implements PromiseLike<InsertState> {
     protected executedPromise!: Promise<any>
@@ -145,28 +148,30 @@ class Insert implements PromiseLike<InsertState> {
     protected async exec(): Promise<InsertState> {
         const db = this.db
         const fileCapacity = db.config.fileCapacity
+        const storePath = db['storagPath']
 
         if (!this.items.length) {
             return {
                 lInserted: 0,
                 fInserted: 0,
-                lFinalCount: db.linesCount,
+                lCount: db.linesCount,
             }
         }
 
         const updatedFiles = [...db.files]
-        const remaininglines = db.linesCount % fileCapacity
+        const remaininglines = fileCapacity - db.linesCount % fileCapacity
 
-        if (!remaininglines) {
+        if (remaininglines === fileCapacity) {
+            console.log('as')
             const delimited = delimitItems(this.items, fileCapacity)
             await Promise.all(delimited
-                .map((subItems, index) => {
-                    const newFilePath = `./${db.files.length + index}.${db.config.filesExtension}`
+                .map((items, index) => {
+                    const newFilePath = path.join(storePath, `./${db.files.length + index}.${db.config.fileExtension}`)
                     updatedFiles.push(newFilePath)
 
                     return appendFile(
-                        path.join(db.dbPath, newFilePath),
-                        subItems.join(os.EOL),
+                        newFilePath,
+                        items.join(os.EOL),
                     )
                 })
             )
@@ -176,10 +181,11 @@ class Insert implements PromiseLike<InsertState> {
             return {
                 lInserted: this.items.length,
                 fInserted: insertedFiles,
-                lFinalCount: db.linesCount + this.items.length
+                lCount: db.linesCount + this.items.length
             }
         } else {
-            const existingLastFilePath = `./${db.files.length - 1}.${db.config.filesExtension}`
+            console.log('a')
+            const existingLastFilePath = db.files[db.files.length - 1] // `./${db.files.length - 1}.${db.config.fileExtension}`
             const remainingItems: string[] = []
 
             let i!: number
@@ -190,7 +196,7 @@ class Insert implements PromiseLike<InsertState> {
                 }
             }
             await appendFile(
-                path.join(db.dbPath, existingLastFilePath),
+                existingLastFilePath,
                 remainingItems.join(os.EOL),
             )
             if (this.items.length <= remaininglines) {
@@ -199,7 +205,7 @@ class Insert implements PromiseLike<InsertState> {
                 return {
                     lInserted: this.items.length,
                     fInserted: insertedFiles,
-                    lFinalCount: db.linesCount + this.items.length
+                    lCount: db.linesCount + this.items.length
                 }
             }
 
@@ -207,11 +213,11 @@ class Insert implements PromiseLike<InsertState> {
             const delimited = delimitItems(lastItems, fileCapacity)
             await Promise.all(delimited
                 .map((subItems, index) => {
-                    const newFilePath = `./${db.files.length + index}.${db.config.filesExtension}`
+                    const newFilePath = path.join(storePath, `./${db.files.length + index}.${db.config.fileExtension}`)
                     updatedFiles.push(newFilePath)
 
                     return appendFile(
-                        path.join(db.dbPath, newFilePath),
+                        newFilePath,
                         subItems.join(os.EOL),
                     )
                 })
@@ -222,7 +228,7 @@ class Insert implements PromiseLike<InsertState> {
             return {
                 lInserted: this.items.length,
                 fInserted: insertedFiles,
-                lFinalCount: db.linesCount + this.items.length
+                lCount: db.linesCount + this.items.length
             }
         }
     }
@@ -243,9 +249,14 @@ class Insert implements PromiseLike<InsertState> {
                         await lastOps['executedPromise']
                     } catch { }
                 }
-                const result = await this.exec()
-                this.insertOpsQueue.shift()
-                res(result)
+
+                try {
+                    const result = await this.exec()
+                    this.insertOpsQueue.shift()
+                    res(result)
+                } catch (err) {
+                    rej(err)
+                }
             }).then(onfulfilled as any, onrejected)
             this.executedPromise = InsertPromise
         }
@@ -278,91 +289,101 @@ interface QueryState {
     }[]
 
     fCount: number
-    lFinalCount: number
+    lCount: number
 }
 class Query implements PromiseLike<QueryState> {
     protected executedPromise!: Promise<any>
 
-    protected async exec() {
-        // await appendFile()
+    protected async exec(files: string[], linesCount: number) {
+        const db = this.db
+        const rangeCapacity = db.config.fileCapacity
+
+        let range = new DRange(0, linesCount)
+        if (this.segments.length) {
+            range = new DRange()
+            for (const segment of this.segments) {
+                if (segment < 0 || segment > files.length - 1) {
+                    continue
+                }
+                range.add(segment * rangeCapacity, segment * rangeCapacity + (rangeCapacity - 1))
+            }
+        }
+        range.subtract(linesCount, Infinity)
+
+        const result: QueryState = {
+            queryItems: [],
+            fCount: files.length,
+            lCount: linesCount,
+        }
+        if (!range.length) {
+            return result
+        }
+
+        let rangeStart = range.index(0)
+        if (this.skipCount) {
+            range.subtract(rangeStart, rangeStart + this.skipCount)
+            if (!range.length) {
+                return result
+            }
+        }
+
+        rangeStart = range.index(0)
+        if (this.limitCount) {
+            range.subtract(rangeStart + this.limitCount, Infinity)
+            if (!range.length) {
+                return result
+            }
+        }
+
+        const queries: Promise<string[]>[] = []
+
+        const start = range.index(0)
+        const end = range.index(range.length - 1)
+
+        const startFileIndex = start / rangeCapacity
+        const endFileIndex = end / rangeCapacity
+
+        let currFileIndex = startFileIndex
+        let currLineIndex = start
+        while (currFileIndex !== endFileIndex) {
+            const query = readLinesUp(files[currFileIndex], currLineIndex % rangeCapacity)
+            queries.push(query)
+            currLineIndex += rangeCapacity - currLineIndex % rangeCapacity
+            currFileIndex++
+        }
+
+        const query = readLinesUp(files[currFileIndex], 0, end % rangeCapacity)
+        queries.push(query)
+
+        const linesRanges = await Promise.all(queries)
+        let id = start
+
+        linesRanges.forEach(lines => {
+            lines.forEach(line => result.queryItems.push({
+                id: id++,
+                item: line
+            }))
+        })
+
+        return result
     }
 
     then<TResult1 = QueryState, TResult2 = never>(onfulfilled?: ((value: QueryState) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): PromiseLike<TResult1 | TResult2> {
         if (!this.executedPromise) {
             const QueryPromise = new Promise(async (res, rej) => {
+                // Taking Snapshot
                 const db = this.db
                 const files = db.files
                 const linesCount = db.linesCount
-                const rangeCapacity = db.config.fileCapacity
+                Promise.resolve()
+                // ____________
 
-                let range = new DRange(0, linesCount)
-                if (this.segmentsArr.length) {
-                    range = new DRange()
-                    for (const segment of this.segmentsArr) {
-                        if (segment < 0 || segment > files.length - 1) {
-                            continue
-                        }
-                        range.add(segment * rangeCapacity, segment * rangeCapacity + (rangeCapacity - 1))
-                    }
+                try {
+                    const result = await this.exec(files, linesCount)
+                    res(result)
+                } catch (err) {
+                    rej(err)
                 }
-                range.subtract(linesCount, Infinity)
-
-                const result: QueryState = {
-                    queryItems: [],
-                    fCount: files.length,
-                    lFinalCount: linesCount,
-                }
-                if (!range.length) {
-                    return res(result)
-                }
-
-                let rangeStart = range.index(0)
-                if (this.skipCount) {
-                    range.subtract(rangeStart, rangeStart + this.skipCount)
-                    if (!range.length) {
-                        return res(result)
-                    }
-                }
-
-                rangeStart = range.index(0)
-                if (this.limitCount) {
-                    range.subtract(rangeStart + this.limitCount, Infinity)
-                    if (!range.length) {
-                        return res(result)
-                    }
-                }
-
-                const queries: Promise<string[]>[] = []
-
-                const start = range.index(0)
-                const end = range.index(range.length - 1)
-
-                const startFileIndex = start / rangeCapacity
-                const endFileIndex = end / rangeCapacity
-
-                let currFileIndex = startFileIndex
-                let currLineIndex = start
-                while (currFileIndex !== endFileIndex) {
-                    const query = readLinesUp(db.files[currFileIndex], currLineIndex % rangeCapacity)
-                    queries.push(query)
-                    currLineIndex += currLineIndex - currLineIndex % rangeCapacity
-                    currFileIndex++
-                }
-
-                const query = readLinesUp(db.files[startFileIndex], 0, end % rangeCapacity)
-                queries.push(query)
-
-                const linesRanges = await Promise.all(queries)
-                let id = start
-
-                linesRanges.forEach(lines => {
-                    lines.forEach(line => result.queryItems.push({
-                        id: id++,
-                        item: line
-                    }))
-                })
-                
-                return result
             }).then(onfulfilled as any, onrejected)
             this.executedPromise = QueryPromise
         }
@@ -372,27 +393,28 @@ class Query implements PromiseLike<QueryState> {
     constructor(
         protected db: DB,
 
-        protected segmentsArr: number[] = [],
+        protected segments: number[] = [],
         protected skipCount: number = 0,
         protected limitCount: number = 0,
         // protected segment
     ) {
-        this.segmentsArr = [...this.segmentsArr]
+        this.segments = [...this.segments]
     }
 
     segment(segment: number): Omit<Query, 'segment' | 'segments'> {
-        this.segmentsArr = [segment]
+        this.segments = [segment]
         return this
     }
-    segmentRange(segmentsRange: [number, number]): Omit<Query, 'segment' | 'segments'> {
-        let start = segmentsRange[0] < 0 ? 0 : segmentsRange[0]
-        let end = segmentsRange[1] < 0 ? 0 : segmentsRange[1]
+    segmentRange(segmentRange: [number, number]): Omit<Query, 'segment' | 'segments'> {
+        let start = segmentRange[0] < 0 ? 0 : segmentRange[0]
+        let end = segmentRange[1] < 0 ? 0 : segmentRange[1]
         if (start > end) {
             ({ start, end } = { start: end, end: start })
         }
-        this.segmentsArr = []
+
+        this.segments = []
         for (let i = 0; start + i <= end; i++) {
-            this.segmentsArr.push(start + i)
+            this.segments.push(start + i)
         }
         return this
     }
@@ -415,133 +437,15 @@ class Query implements PromiseLike<QueryState> {
 }
 
 
+export {
+    CRBL,
+    DB,
 
+    InsertState,
+    Insert,
 
-
-
-
-
-
-async function run() {
-    // range.add(2, 3)
-    // range.add(10, 11)
-    // range.add(7)
-    // range.add(9)
-    // const range = new DRange(10, 100)
-    // // console.log(range.numbers().toString());
-    // console.log(range.length);
-    // range.subtract(100, Infinity)
-    // console.log(range.numbers())
-    // console.log(range.index(0))
-    // range.subtract(2,5)
-    // range.subtract( 47, Infinity)
-    // console.log(range.toString())
-    // console.log(range.index(6))
-    // const db = await JsonBl.connect('asd')
-    // await db.query().segment('3').skip(10).limit(20)
-    // await db.insert(['asd'])
-
-    // const lines = await readLinesUp('/home/redsky/Documents/exio.tech/projects/jsbl/src/jsonl/db/store/1.txt', 1, 3, -1)
-    // console.log(lines)
-
-
-
-
-    // const count = (await matchGlob(`/aaaaaa/asssssssaaa`, { strict: true }))
-    // console.log(count)
-    // i
-    // const o: PromiseLike<number> = {
-    //     // then(f?: ((v: number) => any) | null, g?: ((v: any) => any) | null): Promise<number> { return 1 as any }
-    //     then<TResult1 = number, TResult2 = never>(onfulfilled?: ((value: number) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): PromiseLike<TResult1 | TResult2> {
-
-    //     }
-
-    // }
-    // new Promise().then
-    // await o
-    // console.log(
-    //     await readdir('./dist')
-    // )
-    // Promise.reject(111)
-    //     .then(v => console.log('v'))
-    //     .catch(c => console.log(c))
-    //     .then(l => console.log('aaaaaa'))
-
-    // async function f() {
-    //     // await Promise.resolve()
-    //     console.log('f')
-    // }
-    // async function g() {
-    //     await f()
-    //     console.log('g')
-    // }
-    // g()
-    // console.log('b')
-    // const test = '[ 13-80, 1-2, 1, 3-, 9, ]'.match(/((\d+)-(\d+))|(\d+)/)
-    // console.log(test)
-
-
-    // var str = 'asd-0.testing';
-    // var regex = /(asd-)\d(\.\w+)/;
-    // str = str.replaceAll(regex, "$11$2");
-    // console.log(str);
+    QueryState,
+    Query,
 }
 
-run()
-
-// const access = promisify(fs.access)
-
-// const fileExtension = 'txt'
-
-// module.exports = {
-//     async connect() {
-//         const DBMS = getOrCreateDb(DB, DB_CAPACITY)
-//     }
-// }
-
-
-// async function getDb(db: string)
-
-// async function getOrCreateDb(db, dbCapacity) {
-//     const dirPath = (await matchGlob(`${DB_DIR}/${db}${dbCapacity}/`))[0]
-
-//     const dbMeta = {
-//         dirPath: dirPath,
-//         capacity: dbCapacity,
-//         filesCount: 0,
-//         lastFileCapacity: undefined
-//     }
-//     if (!dirPath) {
-//         await mkdir(dirPath)
-//         return dbMeta
-//     }
-
-//     console.log(`Existing DB Directory ${db}${dbCapacity}!`)
-//     const filePaths = await matchGlob(path.join(dirPath, `*.${fileExtension}`))
-
-//     if (!filePaths.length) {
-//         return dbMeta
-//     }
-
-//     const lastFilePath = filePaths[filePaths.length]
-//     return {
-//         ...dbMeta,
-//         filesCount: filePaths.length,
-//         lastFileCapacity: linesCount(lastFilePath)
-//     }
-// }
-
-
-
-// const filePaths = await matchGlob(path.join(dbPath, `*.${fileExtension}`))
-
-// if (!filePaths.length) {
-//     return dbMeta
-// }
-
-// const lastFilePath = filePaths[filePaths.length]
-// return {
-//     ...dbMeta,
-//     filesCount: filePaths.length,
-//     lastFileCapacity: linesCount(lastFilePath)
-// }
+import './example'

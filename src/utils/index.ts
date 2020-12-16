@@ -120,22 +120,3 @@ export {
     delimitItems,
     readLinesUp,
 }
-
-// const appendFile = promisify(fs.appendFile)
-// const mkdir = promisify(fs.mkdir)
-// const writeFile = promisify(fs.writeFile)
-// const readdir = promisify(fs.readdir)
-
-// async function run() {
-
-//     console.log(
-//         'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-//         await readdir('./dist')
-//     )
-//     Promise.reject(111)
-//         .then(v => console.log('v'))
-//         .catch(c => console.log(c))
-//         .then(l => console.log('aaaaaa'))
-// }
-
-// run()

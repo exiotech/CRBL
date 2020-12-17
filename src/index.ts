@@ -94,6 +94,7 @@ class CRBL {
 
                     return new DB(path.basename(dbPath), dbPath, [], 0, config as any)
                 } catch {
+                    delete this.connections[dbPath]
                     throw new Error(`Unable to create db at path: ${dbPath}`)
                 }
             })() as any

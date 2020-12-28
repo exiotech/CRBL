@@ -11,11 +11,11 @@ import {
 interface QueryState {
     queryItems: {
         id: number;
-        item: string
-    }[]
+        item: string;
+    }[];
 
-    fCount: number
-    lCount: number
+    lCount: number;
+    fCount: number;
 }
 class Query implements PromiseLike<QueryState> {
     protected executedPromise!: Promise<any>
@@ -38,8 +38,8 @@ class Query implements PromiseLike<QueryState> {
 
         const result: QueryState = {
             queryItems: [],
-            fCount: files.length,
             lCount: linesCount,
+            fCount: files.length,
         }
         if (!range.length) {
             return result
@@ -86,7 +86,7 @@ class Query implements PromiseLike<QueryState> {
         linesRanges.forEach(lines => {
             lines.forEach(line => result.queryItems.push({
                 id: id++,
-                item: line
+                item: line,
             }))
         })
 
@@ -97,9 +97,8 @@ class Query implements PromiseLike<QueryState> {
         if (!this.executedPromise) {
             const QueryPromise = new Promise(async (res, rej) => {
                 // Taking Snapshot
-                const db = this.db
-                const files = db.files
-                const linesCount = db.linesCount
+                const files = this.db.files
+                const linesCount = this.db.linesCount
                 Promise.resolve()
                 // ____________
 
@@ -127,12 +126,24 @@ class Query implements PromiseLike<QueryState> {
     }
 
     segment(segment: number): Omit<Query, 'segment' | 'segmentRange'> {
-        this.segments = [segment]
+        if(segment >= 0) {
+            this.segments = [segment]
+            return this
+        }
+        this.segments = [0]
         return this
     }
     segmentRange(segmentRange: [number, number]): Omit<Query, 'segment' | 'segmentRange'> {
-        let start = segmentRange[0] < 0 ? 0 : segmentRange[0]
-        let end = segmentRange[1] < 0 ? 0 : segmentRange[1]
+        if (!(segmentRange instanceof Array) || !segmentRange.length) {
+            segmentRange = [0, Infinity]
+        } else if (segmentRange.length as any === 1) {
+            segmentRange = [segmentRange[0], Infinity]
+        } else if (segmentRange.length > 2) {
+            segmentRange = [segmentRange[0], segmentRange[1]]
+        }
+
+        let start = segmentRange[0] >= 0 ? segmentRange[0] : 0
+        let end = segmentRange[1] >= 0 ? segmentRange[1] : 0
         if (start > end) {
             ({ start, end } = { start: end, end: start })
         }
@@ -144,19 +155,20 @@ class Query implements PromiseLike<QueryState> {
         return this
     }
     skip(count: number): Omit<Query, 'segment' | 'segmentRange'> {
-        if (count < 0) {
-            this.skipCount = 0
+        if (count >= 0) {
+            this.skipCount = count
             return this
         }
-        this.skipCount = count
+
+        this.skipCount = 0
         return this
     }
     limit(count: number): Omit<Query, 'segment' | 'segmentRange'> {
-        if (count < 0) {
-            this.limitCount = 0
+        if (count >= 0) {
+            this.limitCount = count
             return this
         }
-        this.limitCount = count
+        this.limitCount = 0
         return this
     }
 }

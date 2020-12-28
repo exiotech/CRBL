@@ -22,6 +22,7 @@ class Query implements PromiseLike<QueryState> {
 
     protected async exec(files: string[], linesCount: number) {
         const db = this.db
+        const predicate = this.predicate
         const rangeCapacity = db.config.fileCapacity
 
         let range = new DRange(0, linesCount)
@@ -84,10 +85,14 @@ class Query implements PromiseLike<QueryState> {
         let id = start
 
         linesRanges.forEach(lines => {
-            lines.forEach(line => result.queryItems.push({
-                id: id++,
-                item: line,
-            }))
+            lines.forEach(line => {
+                if (predicate(line)) {
+                    result.queryItems.push({
+                        id: id++,
+                        item: line,
+                    })
+                }
+            })
         })
 
         return result
@@ -120,13 +125,14 @@ class Query implements PromiseLike<QueryState> {
         protected segments: number[] = [],
         protected skipCount: number = 0,
         protected limitCount: number = 0,
+        protected predicate: (line: string) => boolean = () => true,
         // protected segment
     ) {
         this.segments = [...this.segments]
     }
 
     segment(segment: number): Omit<Query, 'segment' | 'segmentRange'> {
-        if(segment >= 0) {
+        if (segment >= 0) {
             this.segments = [segment]
             return this
         }
@@ -168,7 +174,16 @@ class Query implements PromiseLike<QueryState> {
             this.limitCount = count
             return this
         }
+
         this.limitCount = 0
+        return this
+    }
+    find(predicate: (line: string) => boolean): Omit<Query, 'segment' | 'segmentRange' | 'limit' | 'skip'> {
+        if (typeof predicate !== 'function') {
+            return this
+        }
+
+        this.predicate = predicate
         return this
     }
 }

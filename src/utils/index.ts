@@ -95,7 +95,7 @@ async function chronologicalSort(filePaths: string[], order: number) {
 }
 
 function delimitItems<T>(items: T[], size: number) {
-    size = size <= 0 ? 1 : size
+    size = size < 1 ? 1 : size
     if (items.length === 0) {
         return []
     }

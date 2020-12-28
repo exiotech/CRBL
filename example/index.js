@@ -30,7 +30,11 @@ async function testMe() {
     await logDbState(db)
 
     // Inserting Much more items
-    db.insert(['7', '8', '9', '10', '11','12','13','14','15']).then(() => console.log('10 ellements added'))
+    db.insert(['4', '8', '9', '10', '11','12','13','14','15']).then(() => console.log('10 ellements added'))
+    console.log('QueriingHeyyyyyyyyyyyyyyyyyy START')
+    const q = await db.query().skip(3).limit(10).find((line) => line === '4')
+    console.log(q)
+    console.log('QueriingHeyyyyyyyyyyyyyyyyyy END')
 
 }
 

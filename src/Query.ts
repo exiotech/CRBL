@@ -88,10 +88,11 @@ class Query implements PromiseLike<QueryState> {
             lines.forEach(line => {
                 if (predicate(line)) {
                     result.queryItems.push({
-                        id: id++,
+                        id,
                         item: line,
                     })
                 }
+                id++
             })
         })
 

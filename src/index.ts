@@ -16,4 +16,4 @@ export {
     InsertState,
 } from './Insert'
 
-import '../example'
+// import '../example'

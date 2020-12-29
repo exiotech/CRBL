@@ -15,10 +15,15 @@ import {
 const appendFile = promisify(fs.appendFile)
 
 
+/**Insertion Result */
 interface InsertState {
+    /**lines count inserted */
     lInserted: number;
+    /**files count created during line insertion */
     fInserted: number;
+    /**lines count in database after insertion */
     lCount: number;
+    /**files count in database after insertion */
     fCount: number;
 }
 class Insert implements PromiseLike<InsertState> {
@@ -132,15 +137,25 @@ class Insert implements PromiseLike<InsertState> {
 
         protected items: string[] = []
     ) {
-        this.items = [...this.items]
+        this.items = this.items.map(item => item + '')
     }
 
+    /**
+     * Single item to insert to db
+     * @param item - item to insert(will be converted to string automatically)
+     */
     one(item: string): Omit<Insert, 'one' | 'many'> {
-        this.items = [item]
+        this.items = [item + '']
         return this
     }
+    /**
+     * Multiple item to insert to db
+     * @param items - items array to insert(each will be converted to string automatically)
+     */
     many(items: string[]): Omit<Insert, 'one' | 'many'> {
-        this.items = [...items]
+        if(items instanceof Array) {
+            this.items = items.map(item => item + '')
+        }
         return this
     }
 }

@@ -21,11 +21,16 @@ const mkdir = promisify(fs.mkdir)
 const readdir = promisify(fs.readdir)
 
 
+/**Database manager */
 class CRBL {
     static connections: {
         [uri: string]: Promise<DB>
     } = {}
 
+    /**
+     * Try to connect to existing database. Throw error if database not exists
+     * @param dbPath - database absolute path
+     */
     static async connect(dbPath: string) {
         if(typeof dbPath !== 'string') {
             throw new Error('Please Provide database path to connect!')
@@ -73,8 +78,20 @@ class CRBL {
         return this.connections[dbPath]
     }
 
+    /**
+     * Try to create and connect to database, Throw error if database exists
+     * @param dbPath - absolute path to create database in
+     * @param dbConfig - database config
+     */
     static async createAndConnect(dbPath: string, dbConfig: {
+        /**Defines each file max capacity in database store */
         fileCapacity: number,
+        /**
+         * Defines each newly created file extension in database store without
+         * starting dot.
+         * 
+         * Default - txt
+         */
         fileExtension?: string
     }) {
         if(typeof dbPath !== 'string') {

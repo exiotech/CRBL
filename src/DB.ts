@@ -39,7 +39,7 @@ class DB {
                 : new Insert(this, this.insertOpsQueue)
 
     }
-    // Change this
+    
     query(segmentRange: [number, number]): Omit<Query, 'segment' | 'segmentRange'>
     query(segment: number): Omit<Query, 'segment' | 'segmentRange'>
     query(): Query

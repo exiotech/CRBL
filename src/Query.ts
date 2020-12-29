@@ -8,13 +8,19 @@ import {
 } from './DB'
 
 
+/**Query Result */
 interface QueryState {
+    /**Queried items array */
     queryItems: {
+        /**id of item,i.e. line index */
         id: number;
+        /**item content - string */
         item: string;
     }[];
 
+    /**lines count in database */
     lCount: number;
+    /**files count in database */
     fCount: number;
 }
 class Query implements PromiseLike<QueryState> {
@@ -86,13 +92,18 @@ class Query implements PromiseLike<QueryState> {
 
         linesRanges.forEach(lines => {
             lines.forEach(line => {
-                if (predicate(line)) {
-                    result.queryItems.push({
-                        id,
-                        item: line,
-                    })
+                try {
+                    if (predicate(line)) {
+                        result.queryItems.push({
+                            id,
+                            item: line,
+                        })
+                    }
+                } catch {
+
+                } finally {
+                    id++
                 }
-                id++
             })
         })
 
@@ -132,6 +143,10 @@ class Query implements PromiseLike<QueryState> {
         this.segments = [...this.segments]
     }
 
+    /**
+     * Sets file index in which to performe Query
+     * @param segment - index of file in db store( after chronological sorting. ).
+     */
     segment(segment: number): Omit<Query, 'segment' | 'segmentRange'> {
         if (segment >= 0) {
             this.segments = [segment]
@@ -140,6 +155,14 @@ class Query implements PromiseLike<QueryState> {
         this.segments = [0]
         return this
     }
+    /**
+     * Sets files indexes range in which to performe Query
+     * @param segmentRange - files range in format [startIndex, endIndex]
+     * - StartIndex default - 0
+     * - endIndex default - Infinity
+     * 
+     * **Note: If some index is negative, 0 will be used.**
+     */
     segmentRange(segmentRange: [number, number]): Omit<Query, 'segment' | 'segmentRange'> {
         if (!(segmentRange instanceof Array) || !segmentRange.length) {
             segmentRange = [0, Infinity]
@@ -161,6 +184,13 @@ class Query implements PromiseLike<QueryState> {
         }
         return this
     }
+    /**
+     * Sets how many lines to skip before performing Query
+     * @param count - lines count to skip
+     * 
+     * **Note: When used with limit, order of calls not matter, first will be performed skip,
+     * thereafter limit.**
+     */
     skip(count: number): Omit<Query, 'segment' | 'segmentRange'> {
         if (count >= 0) {
             this.skipCount = count
@@ -170,6 +200,13 @@ class Query implements PromiseLike<QueryState> {
         this.skipCount = 0
         return this
     }
+    /**
+     * Sets max count of items to Query
+     * @param count - max count of items to query
+     * 
+     * **Note: When used with limit, order of calls not matter, first will be performed skip,
+     * thereafter limit.**
+     */
     limit(count: number): Omit<Query, 'segment' | 'segmentRange'> {
         if (count >= 0) {
             this.limitCount = count
@@ -179,6 +216,12 @@ class Query implements PromiseLike<QueryState> {
         this.limitCount = 0
         return this
     }
+    /**
+     * Defines checker function to call for each queried item,
+     * to define if to include in results.
+     * @param predicate - function which must retur **true** to include item,
+     * or **false(or throw error)** to omit item from results
+     */
     find(predicate: (line: string) => boolean): Omit<Query, 'segment' | 'segmentRange' | 'limit' | 'skip'> {
         if (typeof predicate !== 'function') {
             return this

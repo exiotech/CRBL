@@ -23,6 +23,7 @@ const readdir = promisify(fs.readdir)
 
 /**Database manager */
 class CRBL {
+    /**Connections Map in current node process */
     static connections: {
         [uri: string]: Promise<DB>
     } = {}
@@ -32,8 +33,8 @@ class CRBL {
      * @param dbPath - database absolute path
      */
     static async connect(dbPath: string) {
-        if(typeof dbPath !== 'string') {
-            throw new Error('Please Provide database path to connect!')
+        if (typeof dbPath !== 'string' || !path.isAbsolute(dbPath)) {
+            throw new Error('Please Provide database absolute path to connect!')
         }
 
         if (!this.connections[dbPath]) {
@@ -94,8 +95,8 @@ class CRBL {
          */
         fileExtension?: string
     }) {
-        if(typeof dbPath !== 'string') {
-            throw new Error('Please Provide path to create database!')
+        if (typeof dbPath !== 'string' || !path.isAbsolute(dbPath)) {
+            throw new Error('Please Provide absolute path to create database!')
         }
         if (!dbConfig) {
             throw new Error('Please Provide dbConfig to create database!')

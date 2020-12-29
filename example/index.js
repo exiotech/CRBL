@@ -2,7 +2,6 @@ const path = require('path')
 
 const {
     CRBL,
-    DB,
 } = require('../dist')
 
 

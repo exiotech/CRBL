@@ -8,7 +8,7 @@ What means **line by line** - it means each item stored in database as single li
 ## Usage
 As we starting from scratch, lets create and connect to database from code:
 ```javascript
-const { CRBL } = require('CRBL')
+const { CRBL } = require('crbl')
 
 const db = await CRBL.createAndConnect('/path/to/db', {
     fileCapacity: 10, // files in store will contain max 10 lines.

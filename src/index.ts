@@ -1,5 +1,7 @@
-import sourceMapSupport from 'source-map-support'
-sourceMapSupport.install()
+if (process.env.NODE_ENV === 'DEV') {
+    const sourceMapSupport = require('source-map-support')
+    sourceMapSupport.install()
+}
 
 export {
     CRBL,
